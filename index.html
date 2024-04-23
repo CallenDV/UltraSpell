@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UltraSpell</title>
+<style>
+  body {
+    font-family: Arial, sans-serif;
+  }
+  textarea {
+    width: 100%;
+    height: 200px;
+    font-size: 16px;
+    padding: 10px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    resize: none;
+  }
+  #suggestions {
+    list-style: none;
+    padding: 0;
+    margin: 5px 0 0 0;
+  }
+  #suggestions li {
+    display: inline-block;
+    margin-right: 5px;
+    cursor: pointer;
+    color: blue;
+  }
+</style>
+</head>
+<body>
+  <h1>UltraSpell</h1>
+  <textarea id="textInput" placeholder="Type something..."></textarea>
+  <ul id="suggestions"></ul>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Typo.js/2.0.0/typo.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.12.0"></script>
+<script>
+  async function loadModel() {
+    return await tf.loadLayersModel('https://cdn.jsdelivr.net/npm/@tensorflow-models/sentiment');
+  }
+
+  const textInput = document.getElementById('textInput');
+  const suggestionsList = document.getElementById('suggestions');
+  let model;
+
+  const dictionary = new Typo("en_US");
+
+  loadModel().then(loadedModel => {
+    model = loadedModel;
+  });
+
+  textInput.addEventListener('input', async function() {
+    const text = this.value;
+    const words = text.match(/\b\w+\b/g);
+
+    suggestionsList.innerHTML = '';
+
+    words.forEach(async word => {
+      if (!dictionary.check(word.toLowerCase())) {
+        const suggestions = await suggestWordAI(word);
+        if (suggestions.length > 0) {
+          const listItem = document.createElement('li');
+          listItem.textContent = `${word}: `;
+          suggestions.forEach(suggestion => {
+            const suggestionItem = document.createElement('span');
+            suggestionItem.textContent = suggestion;
+            suggestionItem.addEventListener('click', function() {
+              replaceWord(word, suggestion);
+            });
+            listItem.appendChild(suggestionItem);
+            listItem.appendChild(document.createTextNode(' '));
+          });
+          suggestionsList.appendChild(listItem);
+        }
+      }
+    });
+  });
+
+  async function suggestWordAI(word) {
+    const embedding = await getWordEmbedding(model, word);
+    const similarWords = await findSimilarWords(model, embedding);
+    return similarWords;
+  }
+
+  async function getWordEmbedding(model, word) {
+    const indices = word.split('').map(char => char.charCodeAt(0) - 97);
+
+    const maxLen = 10;
+    if (indices.length < maxLen) {
+        indices.push(...Array(maxLen - indices.length).fill(0));
+    } else {
+        indices.splice(maxLen, indices.length - maxLen);
+    }
+
+    const input = tf.tensor2d([indices]);
+    const embedding = model.predict(input).dataSync();
+
+    return embedding;
+  }
+
+  async function findSimilarWords(model, embedding) {
+    const wordEmbeddings = model.layers[1].getWeights()[0].arraySync();
+    const similarities = [];
+
+    for (let i = 0; i < wordEmbeddings.length; i++) {
+        const similarity = cosineSimilarity(embedding, wordEmbeddings[i]);
+        similarities.push({ word: i, similarity });
+    }
+
+    similarities.sort((a, b) => b.similarity - a.similarity);
+
+    const similarWords = [];
+    for (let i = 0; i < 3; i++) {
+        similarWords.push(indexToWord(similarities[i].word));
+    }
+
+    return similarWords;
+  }
+
+  function cosineSimilarity(vec1, vec2) {
+    const dotProduct = vec1.reduce((acc, val, i) => acc + val * vec2[i], 0);
+    const magnitude1 = Math.sqrt(vec1.reduce((acc, val) => acc + val * val, 0));
+    const magnitude2 = Math.sqrt(vec2.reduce((acc, val) => acc + val * val, 0));
+    return dotProduct / (magnitude1 * magnitude2);
+  }
+
+  function indexToWord(index) {
+    const wordMap = {
+        0: 'apple',
+        1: 'banana',
+        2: 'orange',
+        3: 'pear',
+      // Reminder to self: Actually code this later
+    };
+    return wordMap[index] || 'unknown'; 
+  }
+
+  function replaceWord(oldWord, newWord) {
+    const text = textInput.value;
+    textInput.value = text.replace(oldWord, newWord);
+    suggestionsList.innerHTML = '';
+  }
+</script>
+</body>
+</html>
